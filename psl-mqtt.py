@@ -1,15 +1,18 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+# MQTT For Netgear PowerSave Switches
+# v1 20-10-2020 Tristan Crispijn
+
 # Fill in macs here (sample macs)
-switches = ["DC:EF:09:AA:AA:AA","28:80:88:BB:BB:BB","28:80:88:CC:CC:CC","BC:A5:11:DD:DD:DD"]
+switches = ["DC:EF:09:BB:BB:BB","28:80:88:CC:CC:CC","28:80:88:DD:DD:DD","BC:A5:11:EE:EE:EE"]
 
 mqtt_server = "localhost"
 mqtt_port = "1883"
 mqtt_username = ""
 mqtt_password = ""
 mqtt_connected = False
-poll_time = 5 # in seconds
+poll_time = 30 # in seconds
 netgear_interface = "en0"
 netgear_timeout = 3
 
@@ -28,7 +31,7 @@ import paho.mqtt.client as mqtt
 from psl_class import ProSafeLinux
 import psl_typ
 import time
-
+ 
 def on_connect(client, userdata, flags, rc):
     if rc == 5:
         print("MQTT: Authentication Failure")
@@ -139,31 +142,45 @@ while not stop:
                                 crcerror = switchdata[key][i-1]["error"]
                                 multicastpackets = switchdata[key][i-1]["mcst"]
                                 broadcastpackets = switchdata[key][i-1]["bcst"]
-                                packets  = switchdata[key][i-1]["pkt"]
+                                packets = switchdata[key][i-1]["pkt"]
                                 if sw_data[mac].has_key(str(i)):
-                                    if sw_data[mac][str(i)].has_key("error"):
+                                    if sw_data[mac][str(i)].has_key("Statistics"):
                                         if sw_data[mac][str(i)]["CRCEerror"] != crcerror:
                                             sw_data[mac][str(i)]["CRCError"] = crcerror
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/statistics/crcerror/" + str(crcerror))
                                         if sw_data[mac][str(i)]["Send"] != send:
                                             sw_data[mac][str(i)]["Send"] = send
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/statistics/send/" + str(send))
                                         if sw_data[mac][str(i)]["Received"] != received:
                                             sw_data[mac][str(i)]["Received"] = received
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/statistics/received/" + str(received))
                                         if sw_data[mac][str(i)]["MulticastPackets"] != multicastpackets:
                                             sw_data[mac][str(i)]["MulticastPackets"] = multicastpackets
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/statistics/multicastpackets/" + str(multicastpackets))
                                         if sw_data[mac][str(i)]["BroadcastPackets"] != broadcastpackets:
                                             sw_data[mac][str(i)]["BroadcastPackets"] = broadcastpackets
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/statistics/broadcastpackets/" + str(broadcastpackets))
                                         if sw_data[mac][str(i)]["Packets"] != packets:
                                             sw_data[mac][str(i)]["Packets"] = packets
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/statistics/packets/" + str(packets))
+                                        sw_data[mac][str(i)]["TimeStamp"] = time.time()
                                     else:
-                                        sw_data[mac][str(i)].update({ "Packets" : packets, "Send" : send, "Received" : received, "CRCError" : crcerror, "MulticastPackets" : multicastpackets, "BroadcastPackets" : broadcastpackets})
-                                    
-                                else:
-                                    sw_data[mac][str(i)] = { "Packets" : packets, "Send" : Send, "Received" : received, "CRCError" : crcerror, "MulticastPackets" : multicastpackets, "BroadcastPackets" : broadcastpackets}
-                            print ""
-                            print sw_data
-                            print ""
-                                    
+                                        sw_data[mac][str(i)].update({'Statistics' : {"TimeStamp" : time.time(), "Packets" : packets, "Send" : send, "Received" : received, "CRCError" : crcerror, "MulticastPackets" : multicastpackets, "BroadcastPackets" : broadcastpackets}})
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/statistics/crcerror/" + str(crcerror))
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/statistics/send/" + str(send))
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/statistics/received/" + str(received))
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/statistics/packets/" + str(packets))
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/statistics/broadcastpackets/" + str(broadcastpackets))
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/statistics/multicastpackets/" + str(multicastpackets))
 
+                                else:
+                                    sw_data[mac][str(i)] = {'Statistics' : {"TimeStamp" : time.time(), "Packets" : packets, "Send" : send, "Received" : received, "CRCError" : crcerror, "MulticastPackets" : multicastpackets, "BroadcastPackets" : broadcastpackets}}
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/statistics/crcerror/" + str(crcerror))
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/statistics/send/" + str(send))
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/statistics/received/" + str(received))
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/statistics/packets/" + str(packets))
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/statistics/broadcastpackets/" + str(broadcastpackets))
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/statistics/multicastpackets/" + str(multicastpackets))
                         elif cmd == "speed_stat":
                             for i in range(1, len(switchdata[key]) + 1):
                                 speed = switchdata[key][i-1]["speed"]
@@ -181,22 +198,22 @@ while not stop:
                                     speed = "100 Mbit/s Full Duplex"
                                 if speed == psl_typ.PslTypSpeedStat.SPEED_1G:
                                     speed = "1 Gbit/s"
-                                    
                                 if sw_data[mac].has_key(str(i)):
-                                    if sw_data[mac][str(i)].has_key("Speed"):
+                                    if sw_data[mac][str(i)].has_key("Connection"):
                                         if sw_data[mac][str(i)]["Speed"] != speed:
                                             sw_data[mac][str(i)]["Speed"] = speed
                                             sw_data[mac][str(i)]["Connected"] = connected
+                                            sw_data[mac][str(i)]["TimeStamp"] = time.time()
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/connection/speed/" + speed)
+                                            client.publish("netgear/" + mac + "/" + str(i) + "/connection/connected/" + str(connected))
                                     else:
-                                        sw_data[mac][str(i)].update({ "Speed" : speed, "Connected" : connected })
+                                        sw_data[mac][str(i)].update({'Connection' : {"TimeStamp" : time.time(), "Speed" : speed, "Connected" : connected }})
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/connection/speed/" + speed)
+                                        client.publish("netgear/" + mac + "/" + str(i) + "/connection/connected/" + str(connected))
                                 else:
-                                    sw_data[mac][str(i)] = { "Speed" : speed, "Connected" : connected }
-                                
-                                print ""
-                                print sw_data
-                                print ""
-                                #print (str(i) + " : " + speed)
-                
+                                    sw_data[mac][str(i)] = {'Connection' : {"TimeStamp" : time.time(), "Speed" : speed, "Connected" : connected }}
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/connection/speed/" + speed)
+                                    client.publish("netgear/" + mac + "/" + str(i) + "/connection/connected/" + str(connected))
     print sw_data
-    time.sleep(30)
+    time.sleep(poll_time)
     #stop = True
