@@ -5,7 +5,6 @@
 # v1 20-10-2020 Tristan Crispijn
 
 # Fill in macs here (sample macs)
-switches = ["DC:EF:09:BB:BB:BB","28:80:88:CC:CC:CC","28:80:88:DD:DD:DD","BC:A5:11:EE:EE:EE"]
 
 mqtt_server = "localhost"
 mqtt_port = "1883"
@@ -22,7 +21,6 @@ netgear_query_monitor = ["speed_stat","port_stat"]
 sw_data = {}
 
 """
-netgear_query_not = ["name","ip","MAC","gateway","dhcp","vlan_support","location","qos","netmask","block_unknown_multicast","igmp_header_validation","igmp_snooping"]
 netgear_query_unknown = ["fixme5400","fixme2","fixmeC","fixme7400"]
 netgear_query_multi_not = "vlan_id","vlan_pvid","port_based_qos","vlan802_id","bandwidth_in","bandwidth_out"
 """
@@ -88,15 +86,10 @@ def query_once(mac):
                     cmd = key.get_name()
                     if cmd == "model":
                         model = switchdata[key]
-                    elif cmd == "number_of_ports":
                         ports = int(switchdata[key],16)
-                    elif cmd == "firmwarever":
                         v1 = switchdata[key]
-                    elif cmd == "firmware2ver":
                         v2 = switchdata[key]
-                    elif cmd == "firmware_active":
                         active = int(switchdata[key])
-                    #key.print_result(switchdata[key])
     if active > 0:
         if active == 1:
             firmware = v1
@@ -123,7 +116,6 @@ while not stop:
             print("MQTT: Not Connected")
             continue
         
-    #time.sleep(poll_time)
     for mac in sw_data.keys():
         print("Netgear [" + mac + "] " + str(sw_data[mac]["ports"]) + "x Switch Model " + sw_data[mac]["model"] + " (" + sw_data[mac]["firmware"] + ")")
         query_cmd = []
@@ -145,7 +137,6 @@ while not stop:
                                 packets = switchdata[key][i-1]["pkt"]
                                 if sw_data[mac].has_key(str(i)):
                                     if sw_data[mac][str(i)].has_key("Statistics"):
-                                        if sw_data[mac][str(i)]["CRCEerror"] != crcerror:
                                             sw_data[mac][str(i)]["CRCError"] = crcerror
                                             client.publish("netgear/" + mac + "/" + str(i) + "/statistics/crcerror/" + str(crcerror))
                                         if sw_data[mac][str(i)]["Send"] != send:
@@ -214,6 +205,4 @@ while not stop:
                                     sw_data[mac][str(i)] = {'Connection' : {"TimeStamp" : time.time(), "Speed" : speed, "Connected" : connected }}
                                     client.publish("netgear/" + mac + "/" + str(i) + "/connection/speed/" + speed)
                                     client.publish("netgear/" + mac + "/" + str(i) + "/connection/connected/" + str(connected))
-    print sw_data
     time.sleep(poll_time)
-    #stop = True
