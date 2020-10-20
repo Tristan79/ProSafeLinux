@@ -14,7 +14,7 @@ mqtt_password = ""
 mqtt_connected = False
 poll_time = 2 # in seconds
 netgear_interface = "en0"
-netgear_timeout = 3
+netgear_timeout = 1
 
 netgear_query_once = ["model","number_of_ports","firmwarever","firmware2ver","firmware_active"]
 netgear_query_monitor = ["speed_stat","port_stat"]
@@ -22,6 +22,7 @@ netgear_query_monitor = ["speed_stat","port_stat"]
 sw_data = {}
 big_macs = {}
 
+NOT_CONNECTED = "Not Connected"
 """
 netgear_query_not = [,"MAC",,"location","igmp_header_validation","igmp_snooping","qos","vlan_support","gateway","dhcp","name","ip","netmask","block_unknown_multicast"]
 netgear_query_unknown = ["fixme5400","fixme2","fixmeC","fixme7400"]
@@ -66,9 +67,18 @@ switch = ProSafeLinux()
 switch.set_timeout(netgear_timeout)
 if not switch.bind(netgear_interface):
     print("Netgear: Interface has no addresses, cannot talk to switch")
-else:
-    pass
+    
+def switch_id(mac):
+    return "[" + mac + "] Netgear Switch " + big_macs[mac]['model'] +" (" + big_macs[mac]['firmware'] + ") "
 
+def port_info(port, mac):
+    return "Port [" + port + "/" + str(big_macs[mac]['ports']) + "] "
+
+def ports_info(port, mac):
+    return str(big_macs[mac]['ports']) + " Ports "
+   
+
+   
 def query_once(mac):
     query_cmd = []
     for cmd in netgear_query_once:
@@ -104,17 +114,20 @@ def query_once(mac):
             firmware = v2
     
     if ports != 0 and firmware != "Unknown" and model != "Unkown":
-        print("Netgear [" + mac + "] " + str(ports) + "x Switch Model " + model + " (" + firmware + ") Ooohh...")
-        big_macs[mac] = {model, firmware}
+        global big_macs
+        big_macs[mac] = {"model" : model, "firmware" : firmware, "ports" : ports, "reachable" : True}
+        print(switch_id(mac) + ports_info(ports,mac)  + "Switch Found")
         client.publish("netgear/" + mac + "/" + model)
         client.publish("netgear/" + mac + "/firmware/" + firmware)
         client.publish("netgear/" + mac + "/ports/" + str(ports))
+        client.publish("netgear/" + mac + "/reachable/" + str(True))
         sw_data[mac] =  { "model" : model, "firmware" : firmware, "ports" : ports}
     
 for mac in switches:
     query_once(mac)
-    
+
 stop = False
+
 while not stop:
     
     if not mqtt_connected:
@@ -123,22 +136,51 @@ while not stop:
         except:
             print("MQTT: Not Connected")
             continue
-        
-    for mac in sw_data.keys():
+                                  
+    for mac in switches: #sw_data.keys():
+        #print(switch_id(mac) + ports_info(big_macs[mac]['ports'],mac)  + "\'Can you tell me, how fast you were going?\'")
+
         if not mac in big_macs:
-            query_once(mac);
-        print("Netgear [" + mac + "] " + str(sw_data[mac]["ports"]) + "x Switch Model " + sw_data[mac]["model"] + " (" + sw_data[mac]['firmware'] + ") Tiggle Switch...")
+            query_once(mac); 
+        else:
+            if not big_macs[mac]['reachable']:
+                query_once(mac); 
+            
         query_cmd = []
         for cmd in netgear_query_monitor:
             query_cmd.append(switch.get_cmd_by_name(cmd))
         switchdata = switch.query(query_cmd, mac)
-        if switchdata != False:
+        
+        if switchdata == False:
+            
+            if big_macs.has_key(mac):
+                if big_macs[mac]['reachable'] == True:
+                    print (switch_id(mac) + "Switch Unreachable")
+                    big_macs[mac]['reachable'] = False
+                    client.publish("netgear/" + mac + "/reachable/" + str(False))
+                    for i in range(1,big_macs[mac]['ports']):
+                        if sw_data[mac][str(i)]['Connection']['Speed'] != NOT_CONNECTED:
+                            client.publish("netgear/" + mac + "/ports/" + str(i) + "/speed/" + "Not Connected")
+                            client.publish("netgear/" + mac + "/ports/" + str(i) + "/connected/" + str(False))
+                            print(switch_id(mac) + port_info(str(i),mac) + NOT_CONNECTED)
+                            sw_data[mac][str(i)]['Connection']['Speed'] = NOT_CONNECTED
+                            sw_data[mac][str(i)]['Connection']['Connected'] = False
+                            sw_data[mac][str(i)]['Connection']['TimeStamp'] = time.time()
+                            print "HERE"                
+                    
+                
+        else:
+            #if switchdata == {}:
+            #    pass
             if switchdata != {}:
                 for key in list(switchdata.keys()):
                     if isinstance(key, psl_typ.PslTyp):
                         cmd = key.get_name()
+                        
+                        """
                         if cmd == "port_stat":
                             for i in range(1, len(switchdata[key]) + 1):
+                                
                                 received = switchdata[key][i-1]["rec"]
                                 send  = switchdata[key][i-1]["send"]
                                 crcerror = switchdata[key][i-1]["error"]
@@ -147,6 +189,7 @@ while not stop:
                                 packets = switchdata[key][i-1]["pkt"]
                                 if sw_data[mac].has_key(str(i)):
                                     if sw_data[mac][str(i)].has_key("Statistics"):
+                                        
                                         if sw_data[mac][str(i)]['Statistics']['CRCError'] != crcerror:
                                             sw_data[mac][str(i)]['Statistics']['CRCError'] = crcerror
                                             client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/statistics/crcerror/" + str(crcerror))
@@ -166,6 +209,7 @@ while not stop:
                                             sw_data[mac][str(i)]['Statistics']['Packets'] = packets
                                             client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/statistics/packets/" + str(packets))
                                         sw_data[mac][str(i)]["TimeStamp"] = time.time()
+                                        
                                     else:
                                         sw_data[mac][str(i)].update({'Statistics' : {"TimeStamp" : time.time(), "Packets" : packets, "Send" : send, "Received" : received, "CRCError" : crcerror, "MulticastPackets" : multicastpackets, "BroadcastPackets" : broadcastpackets}})
                                         client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/statistics/crcerror/" + str(crcerror))
@@ -183,13 +227,14 @@ while not stop:
                                     client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/statistics/packets/" + str(packets))
                                     client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/statistics/broadcastpackets/" + str(broadcastpackets))
                                     client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/statistics/multicastpackets/" + str(multicastpackets))
- 
-                        elif cmd == "speed_stat":
+                        """
+                        if cmd == "speed_stat":
                             for i in range(1, len(switchdata[key]) + 1):
                                 speed = switchdata[key][i-1]['speed']
                                 connected = True
+                        
                                 if speed == psl_typ.PslTypSpeedStat.SPEED_NONE:
-                                    speed = "Not connected"
+                                    speed = NOT_CONNECTED
                                     connected = False
                                 if speed == psl_typ.PslTypSpeedStat.SPEED_10MH:
                                     speed = "10 Mbit/s Half Duplex"
@@ -201,21 +246,38 @@ while not stop:
                                     speed = "100 Mbit/s Full Duplex"
                                 if speed == psl_typ.PslTypSpeedStat.SPEED_1G:
                                     speed = "1 Gbit/s"
-                                if sw_data[mac].has_key(str(i)):
+                                
+                                speed_changed = False
+                                if sw_data[mac]:
+                                    if sw_data[mac].has_key(str(i)):
+                                        if sw_data[mac][str(i)].has_key('Connection'):
+                                            if sw_data[mac][str(i)]['Connection']['Speed'] != speed:
+                                                speed_changed = True
+                                        else:
+                                            speed_changed = True
+                                    else:
+                                        speed_changed = True
+                                        
+                                if speed_changed and sw_data[mac].has_key(str(i)):
                                     if sw_data[mac][str(i)].has_key('Connection'):
+                                        #print sw_data[mac][str(i)]['Connection']['Speed']
+                                        #print "dd"
+                                        #print speed
                                         if sw_data[mac][str(i)]['Connection']['Speed'] != speed:
                                             sw_data[mac][str(i)]['Connection']['Speed'] = speed
                                             sw_data[mac][str(i)]['Connection']['Connected'] = connected
                                             sw_data[mac][str(i)]['Connection']['TimeStamp'] = time.time()
-                                            client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/connection/speed/" + speed)
-                                            client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/connection/connected/" + str(connected))
                                     else:
                                         sw_data[mac][str(i)].update({'Connection' : {"TimeStamp" : time.time(), "Speed" : speed, "Connected" : connected }})
-                                        client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/connection/speed/" + speed)
-                                        client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/connection/connected/" + str(connected))
-                                else:
+                                elif speed_changed:
                                     sw_data[mac][str(i)] = {'Connection' : {"TimeStamp" : time.time(), "Speed" : speed, "Connected" : connected }}
-                                    client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/connection/speed/" + speed)
-                                    client.publish("netgear/" + mac + "/ports/raw/" + str(i) + "/connection/connected/" + str(connected))
-
+                                
+                                
+                                if speed_changed:
+                                    # Actions if the speed changed
+                                    print(switch_id(mac) + port_info(str(i),mac) + speed)
+                                    client.publish("netgear/" + mac + "/ports/" + str(i) + "/speed/" + speed)
+                                    client.publish("netgear/" + mac + "/ports/" + str(i) + "/connected/" + str(connected))
+                                    
+                                
     time.sleep(poll_time)
